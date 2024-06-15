@@ -4,4 +4,4 @@ crater layer needs "review" and "confirmed" attributes
 try to implement 3 point circle drawing
 export area and crater to .scc for crater stats 
 plot preview chart
-(Tool bar instead of toolbox?)
+(custom toolbar import file with script tools to mimic arcmap toolbar)
