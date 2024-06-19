@@ -27,7 +27,7 @@ area = arcpy.management.CreateFeatureclass(envi, 'Area_' + layer_name, "POLYGON"
 current_domains = arcpy.da.ListDomains(envi)
 current_domain_names = [domain.name for domain in current_domains]
 domain = 'Crater type'
-if domain in current_domains:
+if domain not in current_domain_names:
     arcpy.management.CreateDomain(envi, domain, '', 'TEXT', 'CODED')
     craterType = {'Standard':'Standard', 'Marked':'Marked'}
     for code in craterType:

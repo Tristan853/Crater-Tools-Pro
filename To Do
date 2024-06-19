@@ -1,6 +1,7 @@
 create "area" and "crater" layers in workflow ✓
-area layer needs to be able to have grids defined in km squares
 crater layer needs "review" and "confirmed" attributes ✓
+configure crater layer symbology to be able to select standard or marked attributes when creating features
+area layer needs to be able to have grids defined in km squares
 try to implement 3 point circle drawing ✓
 export area and crater to .scc for crater stats 
 plot preview chart
