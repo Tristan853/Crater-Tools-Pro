@@ -29,19 +29,21 @@ def internal_reproject():
     crater_vertices = arcpy.management.FeatureVerticesToPoints(crater_layer, crater_layer + '_vertices', 'START')
     crater_vertices1 = arcpy.management.FeatureVerticesToPoints(crater_layer, crater_layer + '_vertices1', 'MID')
     #create diameter line
-    arcpy.management.Merge([crater_vertices, crater_vertices1], workspace + r'\vertices_merge')
-    arcpy.management.PointsToLine(workspace + r'\vertices_merge', workspace + r'\crater_diameter','ORIG_FID')
+    vertices_merge = workspace + r'\vertices_merge'
+    crater_diameter = workspace + r'\crater_diameter'
+    arcpy.management.Merge([crater_vertices, crater_vertices1], vertices_merge)
+    arcpy.management.PointsToLine(vertices_merge, crater_diameter,'ORIG_FID')
     #find center
     crater_center = workspace + r'\crater_center'
-    arcpy.management.FeatureVerticesToPoints(workspace + r'\crater_diameter', crater_center, 'MID')
+    arcpy.management.FeatureVerticesToPoints(crater_diameter, crater_center, 'MID')
     #calculate coordinates
     xy_fields = [['X_coordinate', 'POINT_X'], ['Y_coordinate', 'POINT_Y']]
     center_fields = [['Center_X', 'POINT_X'], ['Center_Y', 'POINT_Y']]
-    arcpy.management.CalculateGeometryAttributes(workspace + r'\vertices_merge', xy_fields, '', '', in_sr, 'DD')
+    arcpy.management.CalculateGeometryAttributes(vertices_merge, xy_fields, '', '', in_sr, 'DD')
     arcpy.management.CalculateGeometryAttributes(crater_center, center_fields, '', '', in_sr, 'DD')
     #add center coordinates to dictionary
     OID_dict={}
-    with arcpy.da.UpdateCursor(workspace + r'\crater_diameter', ['OBJECTID','ORIG_FID']) as cursor:
+    with arcpy.da.UpdateCursor(crater_diameter, ['OBJECTID','ORIG_FID']) as cursor:
         for row in cursor:
             OID_dict.update({row[0]:row[1]})
     del cursor
@@ -53,14 +55,14 @@ def internal_reproject():
             center_coords.update({row[0]: [row[1], row[2]]})
     del cursor
     #assign coordinates to vertices
-    arcpy.management.AddFields(workspace + r'\vertices_merge', [['Center_X', 'DOUBLE'], ['Center_Y', 'DOUBLE']])
-    with arcpy.da.UpdateCursor(workspace + r'\vertices_merge', ['ORIG_FID', 'Center_X', 'Center_Y']) as cursor:
+    arcpy.management.AddFields(vertices_merge, [['Center_X', 'DOUBLE'], ['Center_Y', 'DOUBLE']])
+    with arcpy.da.UpdateCursor(vertices_merge, ['ORIG_FID', 'Center_X', 'Center_Y']) as cursor:
         for row in cursor:
             row[1]=center_coords[row[0]][0]
             row[2]=center_coords[row[0]][1]
             cursor.updateRow(row)
     del cursor
-    true_scale_craters=arcpy.management.CreateFeatureclass(out_path=workspace, out_name='True_Scale_Craters', geometry_type='POLYGON', template='', has_m='ENABLED', has_z='', spatial_reference=in_sr)
+    true_scale_craters=arcpy.management.CreateFeatureclass(out_path=workspace, out_name='True_Scale_Craters', geometry_type='POLYGON')
     arcpy.management.AddField(true_scale_craters.getOutput(0), 'Area', 'DOUBLE')
     #reproject points to stereographic projection
     craterSR = arcpy.Describe(crater_layer).spatialReference
@@ -68,11 +70,13 @@ def internal_reproject():
     Gcs_string = Gcs.exportToString()
     clean_gcs_wkt = Gcs_string.split("];")[0] + "]"
     stereo_scratch = workspace + r'\stereo_scratch'
-    with arcpy.da.UpdateCursor(workspace + r'\vertices_merge', ['Center_X', 'Center_Y', 'ORIG_FID']) as cursor:
+    stereo_append = workspace + r'\stereo_append'
+    arcpy.management.CreateFeatureclass(out_path=workspace, out_name='stereo_append', geometry_type='POLYGON')
+    with arcpy.da.UpdateCursor(vertices_merge, ['Center_X', 'Center_Y', 'ORIG_FID']) as cursor:
         vertices_layer = "vertices_merge_layer"
-        arcpy.management.MakeFeatureLayer(workspace + r'\vertices_merge', vertices_layer)
+        arcpy.management.MakeFeatureLayer(vertices_merge, vertices_layer)
+        x=1
         for row in cursor:
-            x=1
             while x > 0:
                 if x == row[2]:
                     central_meridian = row[0]
@@ -115,53 +119,58 @@ def internal_reproject():
                     arcpy.management.SelectLayerByAttribute(vertices_layer, '', query)
                     arcpy.management.MinimumBoundingGeometry(vertices_layer, stereo_scratch, 'CIRCLE', 'ALL')
                     arcpy.management.SelectLayerByAttribute(vertices_layer, 'CLEAR_SELECTION')
-                    
-                    #project circle into sinusoidal projection
-                    projection_params = {
-                    "GEOGCS": clean_gcs_wkt,
-                    "PROJECTION": "Sinusoidal",
-                    "central_meridian": central_meridian,  # Central meridian as a float or integer
-                    "scale_factor": 1,                     # Scale factor as a float
-                    "false_easting": 0,                    # False easting as a float
-                    "false_northing": 0,                   # False northing as a float
-                    "latitude_of_origin": latitude_of_origin  # Latitude of origin as a float or integer
-                    }
-
-                    # Create the WKT string
-                    sinusoidal_wkt_template = (
-                    'PROJCS["Custom_Sinusoidal",'
-                    '{GEOGCS},'
-                    'PROJECTION["{PROJECTION}"],'
-                    'PARAMETER["Central_Meridian",{central_meridian}],'
-                    'PARAMETER["Scale_Factor",{scale_factor}],'
-                    'PARAMETER["False_Easting",{false_easting}],'
-                    'PARAMETER["False_Northing",{false_northing}],'
-                    'PARAMETER["Latitude_Of_Origin",{latitude_of_origin}],'
-                    'UNIT["Meter",1.0]]'
-                    )
-
-                    sinusoidal_wkt = sinusoidal_wkt_template.format(
-                    GEOGCS=projection_params["GEOGCS"],
-                    PROJECTION=projection_params["PROJECTION"],
-                    central_meridian=projection_params["central_meridian"],
-                    scale_factor=projection_params["scale_factor"],
-                    false_easting=projection_params["false_easting"],
-                    false_northing=projection_params["false_northing"],
-                    latitude_of_origin=projection_params["latitude_of_origin"]
-                    )
-                    ssr=arcpy.SpatialReference()
-                    ssr.loadFromString(sinusoidal_wkt)
-                    arcpy.env.outputCoordinateSystem = ssr
-                    #project undistorted circle
-                    sinusoidal_projected_circle = workspace + r'\sinusoidal_craters'
-                    arcpy.management.Project(stereo_scratch, sinusoidal_projected_circle, ssr)
-                    arcpy.arcpy.management.CalculateGeometryAttributes(sinusoidal_projected_circle, [['Area', 'AREA']], '', 'SQUARE_METERS')
-                    arcpy.management.Append(sinusoidal_projected_circle, true_scale_craters.getOutput(0), 'NO_TEST')            
+                    arcpy.management.Append(stereo_scratch, stereo_append, 'NO_TEST')
+                    x+=1
                     break
                 else:
                     x+=1
-        del cursor
-    x=1
+                    break
+    del cursor
+    with arcpy.da.SearchCursor(stereo_append, ['OBJECTID']) as cursor:
+        for row in cursor:                   
+            #project circle into sinusoidal projection
+            projection_params = {
+            "GEOGCS": clean_gcs_wkt,
+            "PROJECTION": "Sinusoidal",
+            "central_meridian": central_meridian,  # Central meridian as a float or integer
+            "scale_factor": 1,                     # Scale factor as a float
+            "false_easting": 0,                    # False easting as a float
+            "false_northing": 0,                   # False northing as a float
+            "latitude_of_origin": latitude_of_origin  # Latitude of origin as a float or integer
+            }
+
+            # Create the WKT string
+            sinusoidal_wkt_template = (
+            'PROJCS["Custom_Sinusoidal",'
+            '{GEOGCS},'
+            'PROJECTION["{PROJECTION}"],'
+            'PARAMETER["Central_Meridian",{central_meridian}],'
+            'PARAMETER["Scale_Factor",{scale_factor}],'
+            'PARAMETER["False_Easting",{false_easting}],'
+            'PARAMETER["False_Northing",{false_northing}],'
+            'PARAMETER["Latitude_Of_Origin",{latitude_of_origin}],'
+            'UNIT["Meter",1.0]]'
+            )
+
+            sinusoidal_wkt = sinusoidal_wkt_template.format(
+            GEOGCS=projection_params["GEOGCS"],
+            PROJECTION=projection_params["PROJECTION"],
+            central_meridian=projection_params["central_meridian"],
+            scale_factor=projection_params["scale_factor"],
+            false_easting=projection_params["false_easting"],
+            false_northing=projection_params["false_northing"],
+            latitude_of_origin=projection_params["latitude_of_origin"]
+            )
+            ssr=arcpy.SpatialReference()
+            ssr.loadFromString(sinusoidal_wkt)
+            arcpy.env.outputCoordinateSystem = ssr
+            #project undistorted circle
+            sinusoidal_projected_circle = workspace + r'\sinusoidal_craters'
+            arcpy.management.Project(stereo_scratch, sinusoidal_projected_circle, ssr)
+            arcpy.management.CalculateGeometryAttributes(sinusoidal_projected_circle, [['Area', 'AREA']], '', 'SQUARE_METERS')
+            arcpy.management.Append(sinusoidal_projected_circle, true_scale_craters.getOutput(0), 'NO_TEST')            
+                    
+        
     arcpy.management.AddField(true_scale_craters, 'Diameter', 'DOUBLE')
     with arcpy.da.UpdateCursor(true_scale_craters, ['Area', 'Diameter']) as cursor:
         for row in cursor:
@@ -169,9 +178,9 @@ def internal_reproject():
             cursor.updateRow(row)
     del cursor
     arcpy.management.CalculateGeometryAttributes(true_scale_craters, [['Center_X', 'INSIDE_X'], ['Center_Y', 'INSIDE_Y']], '','','', 'DD')
-    delete_list = [stereo_scratch, sinusoidal_projected_circle, workspace + r'\vertices_merge', vertices_layer, crater_vertices, crater_vertices1, crater_center, workspace + r'\crater_diameter']
-    # for x in delete_list:
-    #     arcpy.management.Delete(x)
+    delete_list = [stereo_scratch, sinusoidal_projected_circle, vertices_merge, vertices_layer, crater_vertices, crater_vertices1, crater_center, crater_diameter]
+    for x in delete_list:
+        arcpy.management.Delete(x)
 
 def area_reprojection():
      area_center = workspace + r'\area_center'
@@ -287,7 +296,7 @@ def write_crater_stats_file(stats_file):
 
         with arcpy.da.SearchCursor(true_scale_craters, ['Diameter', 'Center_X', 'Center_Y']) as cursor:						
             for row in cursor:
-                 crater_stats_file.write(str(row[0]) + "\t" + '1' + "\t" + str(row[1]) + "\t" + str(row[2]) + "\n")
+                 crater_stats_file.write(str(row[0]/1000) + "\t" + '1' + "\t" + str(row[1]) + "\t" + str(row[2]) + "\n")
         crater_stats_file.write("}")
         crater_stats_file.close()
 
