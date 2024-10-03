@@ -1,3 +1,0 @@
-crater layer prep for scc file
-    1. create x and y fields for centroid point 
-    2. crater diameter
