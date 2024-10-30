@@ -72,63 +72,68 @@ def internal_reproject():
     stereo_scratch = workspace + r'\stereo_scratch'
     stereo_append = workspace + r'\stereo_append'
     arcpy.management.CreateFeatureclass(out_path=workspace, out_name='stereo_append', geometry_type='POLYGON')
+    x=1
     with arcpy.da.UpdateCursor(vertices_merge, ['Center_X', 'Center_Y', 'ORIG_FID']) as cursor:
         vertices_layer = "vertices_merge_layer"
         arcpy.management.MakeFeatureLayer(vertices_merge, vertices_layer)
-        x=1
+        feature_count = int(arcpy.management.GetCount(vertices_merge)[0])
         for row in cursor:
-            while x > 0:
-                if x == row[2]:
-                    central_meridian = row[0]
-                    latitude_of_origin = row[1]
-                    projection_params = {
-                        "GEOGCS": clean_gcs_wkt,
-                        "PROJECTION": "Stereographic",
-                        "central_meridian": central_meridian,
-                        "scale_factor": 1.0,
-                        "false_easting": 0.0,
-                        "false_northing": 0.0,
-                        "latitude_of_origin": latitude_of_origin
-                    }
+            arcpy.AddMessage(str(x))
+            arcpy.AddMessage(str([row[2]]))
+            # while x <= feature_count:
+            if x == row[2]:
+                arcpy.AddMessage('match')
+                central_meridian = row[0]
+                latitude_of_origin = row[1]
+                projection_params = {
+                    "GEOGCS": clean_gcs_wkt,
+                    "PROJECTION": "Stereographic",
+                    "central_meridian": central_meridian,
+                    "scale_factor": 1.0,
+                    "false_easting": 0.0,
+                    "false_northing": 0.0,
+                    "latitude_of_origin": latitude_of_origin
+                }
 
-                    # Create the WKT string
-                    wkt_template = (
-                    'PROJCS["Custom_Stereographic",'
-                    '{GEOGCS},'
-                    'PROJECTION["{PROJECTION}"],'
-                    'PARAMETER["Central_Meridian",{central_meridian}],'
-                    'PARAMETER["Scale_Factor",{scale_factor}],'
-                    'PARAMETER["False_Easting",{false_easting}],'
-                    'PARAMETER["False_Northing",{false_northing}],'
-                    'PARAMETER["Latitude_Of_Origin",{latitude_of_origin}],'
-                    'UNIT["Meter",1.0]]'
-                    )
-                    wkt = wkt_template.format(
-                        GEOGCS=projection_params["GEOGCS"],
-                        PROJECTION=projection_params["PROJECTION"],
-                        central_meridian=projection_params["central_meridian"],
-                        scale_factor=projection_params["scale_factor"],
-                        false_easting=projection_params["false_easting"],
-                        false_northing=projection_params["false_northing"],
-                        latitude_of_origin=projection_params["latitude_of_origin"]
-                    )
-                    nsr = arcpy.SpatialReference()
-                    nsr.loadFromString(wkt)
-                    arcpy.env.outputCoordinateSystem = nsr
-                    query = f'"ORIG_FID" = {x}'
-                    arcpy.management.SelectLayerByAttribute(vertices_layer, '', query)
-                    arcpy.management.MinimumBoundingGeometry(vertices_layer, stereo_scratch, 'CIRCLE', 'ALL')
-                    arcpy.management.SelectLayerByAttribute(vertices_layer, 'CLEAR_SELECTION')
-                    arcpy.management.Append(stereo_scratch, stereo_append, 'NO_TEST')
-                    x+=1
-                    break
-                else:
-                    x+=1
-                    break
+                # Create the WKT string
+                wkt_template = (
+                'PROJCS["Custom_Stereographic",'
+                '{GEOGCS},'
+                'PROJECTION["{PROJECTION}"],'
+                'PARAMETER["Central_Meridian",{central_meridian}],'
+                'PARAMETER["Scale_Factor",{scale_factor}],'
+                'PARAMETER["False_Easting",{false_easting}],'
+                'PARAMETER["False_Northing",{false_northing}],'
+                'PARAMETER["Latitude_Of_Origin",{latitude_of_origin}],'
+                'UNIT["Meter",1.0]]'
+                )
+                wkt = wkt_template.format(
+                    GEOGCS=projection_params["GEOGCS"],
+                    PROJECTION=projection_params["PROJECTION"],
+                    central_meridian=projection_params["central_meridian"],
+                    scale_factor=projection_params["scale_factor"],
+                    false_easting=projection_params["false_easting"],
+                    false_northing=projection_params["false_northing"],
+                    latitude_of_origin=projection_params["latitude_of_origin"]
+                )
+                nsr = arcpy.SpatialReference()
+                nsr.loadFromString(wkt)
+                arcpy.env.outputCoordinateSystem = nsr
+                query = f"ORIG_FID = {x}"
+                arcpy.management.SelectLayerByAttribute(vertices_layer, 'NEW_SELECTION', query)
+                arcpy.management.MinimumBoundingGeometry(vertices_layer, stereo_scratch, 'CIRCLE', 'ALL')
+                arcpy.management.SelectLayerByAttribute(vertices_layer, 'CLEAR_SELECTION')
+                arcpy.management.Append(stereo_scratch, stereo_append, 'NO_TEST')
+                x+=1
+            else:
+                arcpy.AddMessage('no match')
+                x+=1
     del cursor
     with arcpy.da.SearchCursor(stereo_append, ['OBJECTID']) as cursor:
         for row in cursor:                   
             #project circle into sinusoidal projection
+            central_meridian = row[0]
+            latitude_of_origin = row[1]
             projection_params = {
             "GEOGCS": clean_gcs_wkt,
             "PROJECTION": "Sinusoidal",
@@ -166,7 +171,7 @@ def internal_reproject():
             arcpy.env.outputCoordinateSystem = ssr
             #project undistorted circle
             sinusoidal_projected_circle = workspace + r'\sinusoidal_craters'
-            arcpy.management.Project(stereo_scratch, sinusoidal_projected_circle, ssr)
+            arcpy.management.Project(stereo_append, sinusoidal_projected_circle, ssr)
             arcpy.management.CalculateGeometryAttributes(sinusoidal_projected_circle, [['Area', 'AREA']], '', 'SQUARE_METERS')
             arcpy.management.Append(sinusoidal_projected_circle, true_scale_craters.getOutput(0), 'NO_TEST')            
                     
@@ -178,9 +183,9 @@ def internal_reproject():
             cursor.updateRow(row)
     del cursor
     arcpy.management.CalculateGeometryAttributes(true_scale_craters, [['Center_X', 'INSIDE_X'], ['Center_Y', 'INSIDE_Y']], '','','', 'DD')
-    delete_list = [stereo_scratch, sinusoidal_projected_circle, vertices_merge, vertices_layer, crater_vertices, crater_vertices1, crater_center, crater_diameter]
-    for x in delete_list:
-        arcpy.management.Delete(x)
+    # delete_list = [stereo_scratch, sinusoidal_projected_circle, vertices_merge, vertices_layer, crater_vertices, crater_vertices1, crater_center, crater_diameter]
+    # for x in delete_list:
+    #     arcpy.management.Delete(x)
 
 def area_reprojection():
      area_center = workspace + r'\area_center'
