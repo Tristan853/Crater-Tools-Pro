@@ -71,7 +71,8 @@ def internal_reproject():
     clean_gcs_wkt = Gcs_string.split("];")[0] + "]"
     stereo_scratch = workspace + r'\stereo_scratch'
     stereo_append = workspace + r'\stereo_append'
-    arcpy.management.CreateFeatureclass(out_path=workspace, out_name='stereo_append', geometry_type='POLYGON')
+    true_scale_craters = workspace + r'\True_Scale_Craters'
+    arcpy.management.CreateFeatureclass(out_path=workspace, out_name='stereo_append', geometry_type='POLYGON')#, template=vertices_merge
     x=1
     with arcpy.da.UpdateCursor(vertices_merge, ['Center_X', 'Center_Y', 'ORIG_FID']) as cursor:
         vertices_layer = "vertices_merge_layer"
@@ -129,11 +130,15 @@ def internal_reproject():
                 arcpy.AddMessage('no match')
                 x+=1
     del cursor
-    with arcpy.da.SearchCursor(stereo_append, ['OBJECTID']) as cursor:
+    arcpy.management.JoinField(stereo_append, 'OBJECTID', vertices_merge, 'ORIG_FID')
+    x=1
+    stereo_layer = "stereo_layer"
+    arcpy.management.MakeFeatureLayer(stereo_append, stereo_layer)
+    with arcpy.da.SearchCursor(stereo_append, ['OBJECTID', 'Center_X', 'Center_Y']) as cursor:
         for row in cursor:                   
             #project circle into sinusoidal projection
-            central_meridian = row[0]
-            latitude_of_origin = row[1]
+            central_meridian = row[1]
+            latitude_of_origin = row[2]
             projection_params = {
             "GEOGCS": clean_gcs_wkt,
             "PROJECTION": "Sinusoidal",
@@ -171,9 +176,13 @@ def internal_reproject():
             arcpy.env.outputCoordinateSystem = ssr
             #project undistorted circle
             sinusoidal_projected_circle = workspace + r'\sinusoidal_craters'
-            arcpy.management.Project(stereo_append, sinusoidal_projected_circle, ssr)
+            query = f"ORIG_FID = {x}"
+            arcpy.management.SelectLayerByAttribute(stereo_layer, 'NEW_SELECTION', query)
+            arcpy.management.Project(stereo_layer, sinusoidal_projected_circle, ssr)
             arcpy.management.CalculateGeometryAttributes(sinusoidal_projected_circle, [['Area', 'AREA']], '', 'SQUARE_METERS')
-            arcpy.management.Append(sinusoidal_projected_circle, true_scale_craters.getOutput(0), 'NO_TEST')            
+            arcpy.management.SelectLayerByAttribute(stereo_layer, 'CLEAR_SELECTION')
+            arcpy.management.Append(sinusoidal_projected_circle, true_scale_craters, 'NO_TEST')
+            x+=1            
                     
         
     arcpy.management.AddField(true_scale_craters, 'Diameter', 'DOUBLE')
@@ -240,10 +249,10 @@ def area_reprojection():
      arcpy.management.CalculateGeometryAttributes(workspace + r'\area_vertices', [['X', 'POINT_X'], ['Y', 'POINT_Y']], '', '', '', 'DD')
 
 def write_crater_stats_file(stats_file):
+    true_scale_craters = workspace + r'\True_Scale_Craters'
     now = datetime.datetime.now()
     date = str(now.day) + "." + str(now.month) + "." + str(now.year)
     vertices = workspace + r'\area_vertices'
-    true_scale_craters = workspace + r'\true_scale_craters'
     if os.path.exists(stats_file) == False:
         open(stats_file, 'x')
     else:
