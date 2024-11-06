@@ -79,11 +79,11 @@ def internal_reproject():
         arcpy.management.MakeFeatureLayer(vertices_merge, vertices_layer)
         feature_count = int(arcpy.management.GetCount(vertices_merge)[0])
         for row in cursor:
-            arcpy.AddMessage(str(x))
-            arcpy.AddMessage(str([row[2]]))
+            # arcpy.AddMessage(str(x))
+            # arcpy.AddMessage(str([row[2]]))
             # while x <= feature_count:
             if x == row[2]:
-                arcpy.AddMessage('match')
+                # arcpy.AddMessage('match')
                 central_meridian = row[0]
                 latitude_of_origin = row[1]
                 projection_params = {
@@ -127,7 +127,7 @@ def internal_reproject():
                 arcpy.management.Append(stereo_scratch, stereo_append, 'NO_TEST')
                 x+=1
             else:
-                arcpy.AddMessage('no match')
+                # arcpy.AddMessage('no match')
                 x+=1
     del cursor
     arcpy.management.JoinField(stereo_append, 'OBJECTID', vertices_merge, 'ORIG_FID')
@@ -192,9 +192,9 @@ def internal_reproject():
             cursor.updateRow(row)
     del cursor
     arcpy.management.CalculateGeometryAttributes(true_scale_craters, [['Center_X', 'INSIDE_X'], ['Center_Y', 'INSIDE_Y']], '','','', 'DD')
-    # delete_list = [stereo_scratch, sinusoidal_projected_circle, vertices_merge, vertices_layer, crater_vertices, crater_vertices1, crater_center, crater_diameter]
-    # for x in delete_list:
-    #     arcpy.management.Delete(x)
+    delete_list = [stereo_scratch, sinusoidal_projected_circle, vertices_merge, vertices_layer, crater_vertices, crater_vertices1, crater_center, crater_diameter,stereo_append]
+    for x in delete_list:
+        arcpy.management.Delete(x)
 
 def area_reprojection():
      area_center = workspace + r'\area_center'
@@ -319,6 +319,11 @@ def write_crater_stats_file(stats_file):
                                 "#\n"\
                                 "# Date of measurement export = " + str(date) + "\n"\
                                 "#\n")
+    area_center = workspace + r'\area_center'
+    v = workspace + r'\area_vertices'
+    delete_list = [v, area_center]
+    for x in delete_list:
+        arcpy.management.Delete(x)
             
 internal_reproject()
 area_reprojection()
