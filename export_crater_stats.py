@@ -77,13 +77,10 @@ def internal_reproject():
     with arcpy.da.UpdateCursor(vertices_merge, ['Center_X', 'Center_Y', 'ORIG_FID']) as cursor:
         vertices_layer = "vertices_merge_layer"
         arcpy.management.MakeFeatureLayer(vertices_merge, vertices_layer)
-        feature_count = int(arcpy.management.GetCount(vertices_merge)[0])
+        #feature_count = int(arcpy.management.GetCount(vertices_merge)[0])
+        num_count=[]
         for row in cursor:
-            # arcpy.AddMessage(str(x))
-            # arcpy.AddMessage(str([row[2]]))
-            # while x <= feature_count:
-            if x == row[2]:
-                # arcpy.AddMessage('match')
+            if row[2] not in num_count:
                 central_meridian = row[0]
                 latitude_of_origin = row[1]
                 projection_params = {
@@ -120,15 +117,13 @@ def internal_reproject():
                 nsr = arcpy.SpatialReference()
                 nsr.loadFromString(wkt)
                 arcpy.env.outputCoordinateSystem = nsr
-                query = f"ORIG_FID = {x}"
+                query = f"ORIG_FID = {row[2]}"
                 arcpy.management.SelectLayerByAttribute(vertices_layer, 'NEW_SELECTION', query)
-                arcpy.management.MinimumBoundingGeometry(vertices_layer, stereo_scratch, 'CIRCLE', 'ALL')
+                arcpy.management.MinimumBoundingGeometry(vertices_layer, stereo_scratch, 'CIRCLE', 'LIST', ['Center_X', 'Center_Y'])
                 arcpy.management.SelectLayerByAttribute(vertices_layer, 'CLEAR_SELECTION')
                 arcpy.management.Append(stereo_scratch, stereo_append, 'NO_TEST')
-                x+=1
-            else:
-                # arcpy.AddMessage('no match')
-                x+=1
+                num_count.append(row[2])
+                arcpy.AddMessage(num_count)
     del cursor
     arcpy.management.JoinField(stereo_append, 'OBJECTID', vertices_merge, 'ORIG_FID')
     x=1
@@ -322,8 +317,8 @@ def write_crater_stats_file(stats_file):
     area_center = workspace + r'\area_center'
     v = workspace + r'\area_vertices'
     delete_list = [v, area_center]
-    for x in delete_list:
-        arcpy.management.Delete(x)
+    # for x in delete_list:
+    #     arcpy.management.Delete(x)
             
 internal_reproject()
 area_reprojection()
