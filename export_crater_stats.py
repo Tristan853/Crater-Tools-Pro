@@ -4,7 +4,9 @@ import arcpy.da
 import arcpy.management
 workspace = arcpy.env.workspace
 arcpy.env.overwriteOutput = True
-crater_layer = arcpy.GetParameterAsText(0)
+input_layer = arcpy.GetParameterAsText(0)
+crater_layer= workspace + r'\crater_copy'
+arcpy.management.CopyFeatures(input_layer, crater_layer)
 area_layer = arcpy.GetParameterAsText(1)
 approach = arcpy.GetParameterAsText(2)
 folder = arcpy.GetParameterAsText(3)
@@ -14,7 +16,7 @@ if file_type == 'SCC':
 	stats_file_output = fname + '.scc'
 elif file_type == 'DIAM':
 	stats_file_output = fname + '.diam'
-area_name = crater_layer.split("\\")
+area_name = input_layer.split("\\")
 
 desc = arcpy.Describe(crater_layer)
 sr = desc.spatialReference
@@ -323,3 +325,4 @@ def write_crater_stats_file(stats_file):
 internal_reproject()
 area_reprojection()
 write_crater_stats_file(stats_file_output)
+arcpy.management.Delete(crater_layer)
