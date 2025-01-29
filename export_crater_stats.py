@@ -1,23 +1,41 @@
-import arcpy, math, datetime, time, os
+#*Credits text (Placeholder*)
 
+#Module imports
+import arcpy, math, datetime, os
 import arcpy.da
 import arcpy.management
+
+#Arcpy Enviroment settings
 workspace = arcpy.env.workspace
 arcpy.env.overwriteOutput = True
+
+#Input variables
 input_layer = arcpy.GetParameterAsText(0)
 crater_layer= workspace + r'\crater_copy'
-arcpy.management.CopyFeatures(input_layer, crater_layer)
-area_layer = arcpy.GetParameterAsText(1)
-approach = arcpy.GetParameterAsText(2)
-folder = arcpy.GetParameterAsText(3)
-fname = os.path.join(folder, arcpy.GetParameterAsText(4))
-file_type = arcpy.GetParameterAsText(5)
+area_layer = arcpy.GetParameterAsText(2)
+approach = arcpy.GetParameterAsText(3)
+folder = arcpy.GetParameterAsText(4)
+fname = os.path.join(folder, arcpy.GetParameterAsText(5))
+file_type = arcpy.GetParameterAsText(6)
+
+#Include "Marked" for review craters in final analysis conditional
+include_marked = arcpy.GetParameterAsText(1)
+arcpy.AddMessage(include_marked)
+if include_marked == "true":
+    arcpy.management.CopyFeatures(input_layer, crater_layer)
+elif include_marked == "false":
+    arcpy.management.SelectLayerByAttribute(input_layer, "NEW_SELECTION", "Crater_Type = 'Standard'")
+    arcpy.management.CopyFeatures(input_layer, crater_layer)
+    arcpy.management.SelectLayerByAttribute(input_layer, 'CLEAR_SELECTION')
+
+#Output file type conditional
 if file_type == 'SCC':
 	stats_file_output = fname + '.scc'
 elif file_type == 'DIAM':
 	stats_file_output = fname + '.diam'
-area_name = input_layer.split("\\")
 
+#Projection variables
+area_name = input_layer.split("\\")
 desc = arcpy.Describe(crater_layer)
 sr = desc.spatialReference
 major_axis = sr.semiMajorAxis
@@ -27,22 +45,27 @@ sr_name = sr.name
 def internal_reproject():
     in_sr=arcpy.Describe(crater_layer).spatialReference
     arcpy.env.outputCoordinateSystem = in_sr
+
     #convert crater feature vertices to points
     crater_vertices = arcpy.management.FeatureVerticesToPoints(crater_layer, crater_layer + '_vertices', 'START')
     crater_vertices1 = arcpy.management.FeatureVerticesToPoints(crater_layer, crater_layer + '_vertices1', 'MID')
+
     #create diameter line
     vertices_merge = workspace + r'\vertices_merge'
     crater_diameter = workspace + r'\crater_diameter'
     arcpy.management.Merge([crater_vertices, crater_vertices1], vertices_merge)
     arcpy.management.PointsToLine(vertices_merge, crater_diameter,'ORIG_FID')
+
     #find center
     crater_center = workspace + r'\crater_center'
     arcpy.management.FeatureVerticesToPoints(crater_diameter, crater_center, 'MID')
+
     #calculate coordinates
     xy_fields = [['X_coordinate', 'POINT_X'], ['Y_coordinate', 'POINT_Y']]
     center_fields = [['Center_X', 'POINT_X'], ['Center_Y', 'POINT_Y']]
     arcpy.management.CalculateGeometryAttributes(vertices_merge, xy_fields, '', '', in_sr, 'DD')
     arcpy.management.CalculateGeometryAttributes(crater_center, center_fields, '', '', in_sr, 'DD')
+
     #add center coordinates to dictionary
     OID_dict={}
     with arcpy.da.UpdateCursor(crater_diameter, ['OBJECTID','ORIG_FID']) as cursor:
@@ -56,6 +79,7 @@ def internal_reproject():
             cursor.updateRow(row)
             center_coords.update({row[0]: [row[1], row[2]]})
     del cursor
+
     #assign coordinates to vertices
     arcpy.management.AddFields(vertices_merge, [['Center_X', 'DOUBLE'], ['Center_Y', 'DOUBLE']])
     with arcpy.da.UpdateCursor(vertices_merge, ['ORIG_FID', 'Center_X', 'Center_Y']) as cursor:
@@ -66,6 +90,7 @@ def internal_reproject():
     del cursor
     true_scale_craters=arcpy.management.CreateFeatureclass(out_path=workspace, out_name='True_Scale_Craters', geometry_type='POLYGON')
     arcpy.management.AddField(true_scale_craters.getOutput(0), 'Area', 'DOUBLE')
+
     #reproject points to stereographic projection
     craterSR = arcpy.Describe(crater_layer).spatialReference
     Gcs = craterSR.GCS
@@ -74,12 +99,11 @@ def internal_reproject():
     stereo_scratch = workspace + r'\stereo_scratch'
     stereo_append = workspace + r'\stereo_append'
     true_scale_craters = workspace + r'\True_Scale_Craters'
-    arcpy.management.CreateFeatureclass(out_path=workspace, out_name='stereo_append', geometry_type='POLYGON')#, template=vertices_merge
+    arcpy.management.CreateFeatureclass(out_path=workspace, out_name='stereo_append', geometry_type='POLYGON')
     x=1
     with arcpy.da.UpdateCursor(vertices_merge, ['Center_X', 'Center_Y', 'ORIG_FID']) as cursor:
         vertices_layer = "vertices_merge_layer"
         arcpy.management.MakeFeatureLayer(vertices_merge, vertices_layer)
-        #feature_count = int(arcpy.management.GetCount(vertices_merge)[0])
         num_count=[]
         for row in cursor:
             if row[2] not in num_count:
@@ -125,7 +149,9 @@ def internal_reproject():
                 arcpy.management.SelectLayerByAttribute(vertices_layer, 'CLEAR_SELECTION')
                 arcpy.management.Append(stereo_scratch, stereo_append, 'NO_TEST')
                 num_count.append(row[2])
-                arcpy.AddMessage(num_count)
+                
+                ##Debugging message
+                #arcpy.AddMessage(num_count)
     del cursor
     arcpy.management.JoinField(stereo_append, 'OBJECTID', vertices_merge, 'ORIG_FID')
     x=1
@@ -197,6 +223,7 @@ def area_reprojection():
      area_center = workspace + r'\area_center'
      arcpy.management.FeatureToPoint(area_layer, area_center, 'INSIDE')
      arcpy.management.CalculateGeometryAttributes(area_center, [['Center_X', 'POINT_X'], ['Center_Y', 'POINT_Y']], '', '', '', 'DD')
+
      #calculate area with sinusoidal projection with area center as central meridian
      craterSR = arcpy.Describe(crater_layer).spatialReference
      Gcs = craterSR.GCS
@@ -248,7 +275,7 @@ def area_reprojection():
 def write_crater_stats_file(stats_file):
     true_scale_craters = workspace + r'\True_Scale_Craters'
     now = datetime.datetime.now()
-    date = str(now.day) + "." + str(now.month) + "." + str(now.year)
+    date = str(now.month) + "." + str(now.day) + "." + str(now.year)
     vertices = workspace + r'\area_vertices'
     if os.path.exists(stats_file) == False:
         open(stats_file, 'x')
@@ -302,7 +329,7 @@ def write_crater_stats_file(stats_file):
                                         "#\n"\
                                         "Total_area = " + str(total_area) + " <km^2>\n"\
                                         "#\n"\
-                                        "# crater_diameters: \n"\
+                                        "# crater_diameters: <km>\n"\
                                         "crater = {diam, fraction, lon, lat\n")
 
         with arcpy.da.SearchCursor(true_scale_craters, ['Diameter', 'Center_X', 'Center_Y']) as cursor:						
