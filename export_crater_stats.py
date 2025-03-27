@@ -346,8 +346,8 @@ def write_crater_stats_file(stats_file):
     area_center = workspace + r'\area_center'
     v = workspace + r'\area_vertices'
     delete_list = [v, area_center]
-    # for x in delete_list:
-    #     arcpy.management.Delete(x)
+    for x in delete_list:
+        arcpy.management.Delete(x)
             
 internal_reproject()
 area_reprojection()
