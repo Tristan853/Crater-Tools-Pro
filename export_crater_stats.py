@@ -1,4 +1,9 @@
-#*Credits text (Placeholder*)
+###
+# *Credits text (Placeholder*)
+#
+#
+#
+###
 
 #Module imports
 import arcpy, math, datetime, os
@@ -13,18 +18,16 @@ arcpy.env.overwriteOutput = True
 input_layer = arcpy.GetParameterAsText(0)
 crater_layer= workspace + r'\crater_copy'
 area_layer = arcpy.GetParameterAsText(2)
-approach = arcpy.GetParameterAsText(3)
-folder = arcpy.GetParameterAsText(4)
-fname = os.path.join(folder, arcpy.GetParameterAsText(5))
-file_type = arcpy.GetParameterAsText(6)
+folder = arcpy.GetParameterAsText(3)
+fname = os.path.join(folder, arcpy.GetParameterAsText(4))
+file_type = arcpy.GetParameterAsText(5)
 
 #Include "Marked" for review craters in final analysis conditional
 include_marked = arcpy.GetParameterAsText(1)
-arcpy.AddMessage(include_marked)
 if include_marked == "true":
     arcpy.management.CopyFeatures(input_layer, crater_layer)
-elif include_marked == "false":
-    arcpy.management.SelectLayerByAttribute(input_layer, "NEW_SELECTION", "Crater_Type = 'Standard'")
+else:
+    arcpy.management.SelectLayerByAttribute(input_layer, "NEW_SELECTION", "Crater_Typ = 'Standard'")
     arcpy.management.CopyFeatures(input_layer, crater_layer)
     arcpy.management.SelectLayerByAttribute(input_layer, 'CLEAR_SELECTION')
 
@@ -43,6 +46,8 @@ minor_axis = sr.semiMinorAxis
 sr_name = sr.name
 
 def internal_reproject():
+    arcpy.env.overwriteOutput = True
+
     in_sr=arcpy.Describe(crater_layer).spatialReference
     arcpy.env.outputCoordinateSystem = in_sr
 
@@ -88,8 +93,9 @@ def internal_reproject():
             row[2]=center_coords[row[0]][1]
             cursor.updateRow(row)
     del cursor
-    true_scale_craters=arcpy.management.CreateFeatureclass(out_path=workspace, out_name='True_Scale_Craters', geometry_type='POLYGON')
-    arcpy.management.AddField(true_scale_craters.getOutput(0), 'Area', 'DOUBLE')
+    true_scale_craters = workspace + r'\True_Scale_Craters'
+    arcpy.management.CreateFeatureclass(out_path=workspace, out_name='True_Scale_Craters', geometry_type='POLYGON')
+    arcpy.management.AddField(true_scale_craters, 'Area', 'DOUBLE')
 
     #reproject points to stereographic projection
     craterSR = arcpy.Describe(crater_layer).spatialReference
@@ -98,7 +104,7 @@ def internal_reproject():
     clean_gcs_wkt = Gcs_string.split("];")[0] + "]"
     stereo_scratch = workspace + r'\stereo_scratch'
     stereo_append = workspace + r'\stereo_append'
-    true_scale_craters = workspace + r'\True_Scale_Craters'
+    
     arcpy.management.CreateFeatureclass(out_path=workspace, out_name='stereo_append', geometry_type='POLYGON')
     x=1
     with arcpy.da.UpdateCursor(vertices_merge, ['Center_X', 'Center_Y', 'ORIG_FID']) as cursor:
@@ -142,6 +148,7 @@ def internal_reproject():
                 )
                 nsr = arcpy.SpatialReference()
                 nsr.loadFromString(wkt)
+                arcpy.AddMessage(str(wkt))
                 arcpy.env.outputCoordinateSystem = nsr
                 query = f"ORIG_FID = {row[2]}"
                 arcpy.management.SelectLayerByAttribute(vertices_layer, 'NEW_SELECTION', query)
@@ -206,7 +213,6 @@ def internal_reproject():
             arcpy.management.SelectLayerByAttribute(stereo_layer, 'CLEAR_SELECTION')
             arcpy.management.Append(sinusoidal_projected_circle, true_scale_craters, 'NO_TEST')
             x+=1            
-                    
         
     arcpy.management.AddField(true_scale_craters, 'Diameter', 'DOUBLE')
     with arcpy.da.UpdateCursor(true_scale_craters, ['Area', 'Diameter']) as cursor:
@@ -216,8 +222,17 @@ def internal_reproject():
     del cursor
     arcpy.management.CalculateGeometryAttributes(true_scale_craters, [['Center_X', 'INSIDE_X'], ['Center_Y', 'INSIDE_Y']], '','','', 'DD')
     delete_list = [stereo_scratch, sinusoidal_projected_circle, vertices_merge, vertices_layer, crater_vertices, crater_vertices1, crater_center, crater_diameter,stereo_append]
-    for x in delete_list:
-        arcpy.management.Delete(x)
+    
+    aprx = arcpy.mp.ArcGISProject("CURRENT")  # Open the current ArcGIS Pro project
+    map_obj = aprx.listMaps("Map")[0]
+    map_obj.addDataFromPath(true_scale_craters)
+
+    debug_mode = arcpy.GetParameterAsText(6)
+    if debug_mode == 'false':
+        for x in delete_list:
+            arcpy.management.Delete(x)
+    else:
+        pass
 
 def area_reprojection():
      area_center = workspace + r'\area_center'
@@ -284,21 +299,9 @@ def write_crater_stats_file(stats_file):
 
     crater_stats_file = open(stats_file, "w")
 
-    if approach == "BCC":
-        methodology_name = "Buffered crater count"
-
-    if approach == "TRAD":
-        methodology_name = "Traditional crater counting approach"
-
-    if approach == "NSC":
-        methodology_name = "Non-sparseness correction"
-
-    if approach == "BNSC":
-        methodology_name = "Buffered non-sparseness correction"
-
     if file_type == "SCC":
         n_area = 1
-        crater_stats_file.write("# Spatial crater count for Craterstats - " + methodology_name + "\n"\
+        crater_stats_file.write("# Spatial crater count for Craterstats - Traditional crater counting approach" + "\n"\
                                 "#\n"\
                                 "# Date of measurement = " + str(date) + "\n"\
                                 "#\n"\
@@ -339,7 +342,7 @@ def write_crater_stats_file(stats_file):
         crater_stats_file.close()
 
     if file_type == "DIAM":
-            crater_stats_file.write("# Diam file for Craterstats - " + methodology_name + "\n"\
+            crater_stats_file.write("# Diam file for Craterstats - Traditional crater counting approach" + "\n"\
                                 "#\n"\
                                 "# Date of measurement export = " + str(date) + "\n"\
                                 "#\n")
@@ -348,8 +351,8 @@ def write_crater_stats_file(stats_file):
     delete_list = [v, area_center]
     for x in delete_list:
         arcpy.management.Delete(x)
-            
+
 internal_reproject()
 area_reprojection()
 write_crater_stats_file(stats_file_output)
-arcpy.management.Delete(crater_layer)
+#arcpy.management.Delete(crater_layer)
