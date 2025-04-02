@@ -46,31 +46,24 @@ minor_axis = sr.semiMinorAxis
 sr_name = sr.name
 
 def internal_reproject():
-    arcpy.env.overwriteOutput = True
-
     in_sr=arcpy.Describe(crater_layer).spatialReference
     arcpy.env.outputCoordinateSystem = in_sr
-
     #convert crater feature vertices to points
     crater_vertices = arcpy.management.FeatureVerticesToPoints(crater_layer, crater_layer + '_vertices', 'START')
     crater_vertices1 = arcpy.management.FeatureVerticesToPoints(crater_layer, crater_layer + '_vertices1', 'MID')
-
     #create diameter line
     vertices_merge = workspace + r'\vertices_merge'
     crater_diameter = workspace + r'\crater_diameter'
     arcpy.management.Merge([crater_vertices, crater_vertices1], vertices_merge)
     arcpy.management.PointsToLine(vertices_merge, crater_diameter,'ORIG_FID')
-
     #find center
     crater_center = workspace + r'\crater_center'
     arcpy.management.FeatureVerticesToPoints(crater_diameter, crater_center, 'MID')
-
     #calculate coordinates
     xy_fields = [['X_coordinate', 'POINT_X'], ['Y_coordinate', 'POINT_Y']]
     center_fields = [['Center_X', 'POINT_X'], ['Center_Y', 'POINT_Y']]
     arcpy.management.CalculateGeometryAttributes(vertices_merge, xy_fields, '', '', in_sr, 'DD')
     arcpy.management.CalculateGeometryAttributes(crater_center, center_fields, '', '', in_sr, 'DD')
-
     #add center coordinates to dictionary
     OID_dict={}
     with arcpy.da.UpdateCursor(crater_diameter, ['OBJECTID','ORIG_FID']) as cursor:
@@ -84,7 +77,6 @@ def internal_reproject():
             cursor.updateRow(row)
             center_coords.update({row[0]: [row[1], row[2]]})
     del cursor
-
     #assign coordinates to vertices
     arcpy.management.AddFields(vertices_merge, [['Center_X', 'DOUBLE'], ['Center_Y', 'DOUBLE']])
     with arcpy.da.UpdateCursor(vertices_merge, ['ORIG_FID', 'Center_X', 'Center_Y']) as cursor:
@@ -93,10 +85,8 @@ def internal_reproject():
             row[2]=center_coords[row[0]][1]
             cursor.updateRow(row)
     del cursor
-    true_scale_craters = workspace + r'\True_Scale_Craters'
-    arcpy.management.CreateFeatureclass(out_path=workspace, out_name='True_Scale_Craters', geometry_type='POLYGON')
-    arcpy.management.AddField(true_scale_craters, 'Area', 'DOUBLE')
-
+    true_scale_craters=arcpy.management.CreateFeatureclass(out_path=workspace, out_name='True_Scale_Craters', geometry_type='POLYGON')
+    arcpy.management.AddField(true_scale_craters.getOutput(0), 'Area', 'DOUBLE')
     #reproject points to stereographic projection
     craterSR = arcpy.Describe(crater_layer).spatialReference
     Gcs = craterSR.GCS
@@ -104,15 +94,19 @@ def internal_reproject():
     clean_gcs_wkt = Gcs_string.split("];")[0] + "]"
     stereo_scratch = workspace + r'\stereo_scratch'
     stereo_append = workspace + r'\stereo_append'
-    
-    arcpy.management.CreateFeatureclass(out_path=workspace, out_name='stereo_append', geometry_type='POLYGON')
+    true_scale_craters = workspace + r'\True_Scale_Craters'
+    arcpy.management.CreateFeatureclass(out_path=workspace, out_name='stereo_append', geometry_type='POLYGON')#, template=vertices_merge
     x=1
     with arcpy.da.UpdateCursor(vertices_merge, ['Center_X', 'Center_Y', 'ORIG_FID']) as cursor:
         vertices_layer = "vertices_merge_layer"
         arcpy.management.MakeFeatureLayer(vertices_merge, vertices_layer)
-        num_count=[]
+        feature_count = int(arcpy.management.GetCount(vertices_merge)[0])
         for row in cursor:
-            if row[2] not in num_count:
+            # arcpy.AddMessage(str(x))
+            # arcpy.AddMessage(str([row[2]]))
+            # while x <= feature_count:
+            if x == row[2]:
+                # arcpy.AddMessage('match')
                 central_meridian = row[0]
                 latitude_of_origin = row[1]
                 projection_params = {
@@ -148,17 +142,16 @@ def internal_reproject():
                 )
                 nsr = arcpy.SpatialReference()
                 nsr.loadFromString(wkt)
-                arcpy.AddMessage(str(wkt))
                 arcpy.env.outputCoordinateSystem = nsr
-                query = f"ORIG_FID = {row[2]}"
+                query = f"ORIG_FID = {x}"
                 arcpy.management.SelectLayerByAttribute(vertices_layer, 'NEW_SELECTION', query)
-                arcpy.management.MinimumBoundingGeometry(vertices_layer, stereo_scratch, 'CIRCLE', 'LIST', ['Center_X', 'Center_Y'])
+                arcpy.management.MinimumBoundingGeometry(vertices_layer, stereo_scratch, 'CIRCLE', 'ALL')
                 arcpy.management.SelectLayerByAttribute(vertices_layer, 'CLEAR_SELECTION')
                 arcpy.management.Append(stereo_scratch, stereo_append, 'NO_TEST')
-                num_count.append(row[2])
-                
-                ##Debugging message
-                #arcpy.AddMessage(num_count)
+                x+=1
+            else:
+                # arcpy.AddMessage('no match')
+                x+=1
     del cursor
     arcpy.management.JoinField(stereo_append, 'OBJECTID', vertices_merge, 'ORIG_FID')
     x=1
@@ -213,6 +206,7 @@ def internal_reproject():
             arcpy.management.SelectLayerByAttribute(stereo_layer, 'CLEAR_SELECTION')
             arcpy.management.Append(sinusoidal_projected_circle, true_scale_craters, 'NO_TEST')
             x+=1            
+                    
         
     arcpy.management.AddField(true_scale_craters, 'Diameter', 'DOUBLE')
     with arcpy.da.UpdateCursor(true_scale_craters, ['Area', 'Diameter']) as cursor:
