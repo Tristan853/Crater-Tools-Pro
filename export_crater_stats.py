@@ -1,21 +1,44 @@
-import arcpy, math, datetime, time, os
+###
+# *Credits text (Placeholder*)
+#
+#
+#
+###
 
+#Module imports
+import arcpy, math, datetime, os
 import arcpy.da
 import arcpy.management
+
+#Arcpy Enviroment settings
 workspace = arcpy.env.workspace
 arcpy.env.overwriteOutput = True
-crater_layer = arcpy.GetParameterAsText(0)
-area_layer = arcpy.GetParameterAsText(1)
-approach = arcpy.GetParameterAsText(2)
+
+#Input variables
+input_layer = arcpy.GetParameterAsText(0)
+crater_layer= workspace + r'\crater_copy'
+area_layer = arcpy.GetParameterAsText(2)
 folder = arcpy.GetParameterAsText(3)
 fname = os.path.join(folder, arcpy.GetParameterAsText(4))
 file_type = arcpy.GetParameterAsText(5)
+
+#Include "Marked" for review craters in final analysis conditional
+include_marked = arcpy.GetParameterAsText(1)
+if include_marked == "true":
+    arcpy.management.CopyFeatures(input_layer, crater_layer)
+else:
+    arcpy.management.SelectLayerByAttribute(input_layer, "NEW_SELECTION", "Crater_Typ = 'Standard'")
+    arcpy.management.CopyFeatures(input_layer, crater_layer)
+    arcpy.management.SelectLayerByAttribute(input_layer, 'CLEAR_SELECTION')
+
+#Output file type conditional
 if file_type == 'SCC':
 	stats_file_output = fname + '.scc'
 elif file_type == 'DIAM':
 	stats_file_output = fname + '.diam'
-area_name = crater_layer.split("\\")
 
+#Projection variables
+area_name = input_layer.split("\\")
 desc = arcpy.Describe(crater_layer)
 sr = desc.spatialReference
 major_axis = sr.semiMajorAxis
@@ -193,13 +216,23 @@ def internal_reproject():
     del cursor
     arcpy.management.CalculateGeometryAttributes(true_scale_craters, [['Center_X', 'INSIDE_X'], ['Center_Y', 'INSIDE_Y']], '','','', 'DD')
     delete_list = [stereo_scratch, sinusoidal_projected_circle, vertices_merge, vertices_layer, crater_vertices, crater_vertices1, crater_center, crater_diameter,stereo_append]
-    for x in delete_list:
-        arcpy.management.Delete(x)
+    
+    aprx = arcpy.mp.ArcGISProject("CURRENT")  # Open the current ArcGIS Pro project
+    map_obj = aprx.activeMap
+    map_obj.addDataFromPath(true_scale_craters)
+
+    debug_mode = arcpy.GetParameterAsText(6)
+    if debug_mode == 'false':
+        for x in delete_list:
+            arcpy.management.Delete(x)
+    else:
+        pass
 
 def area_reprojection():
      area_center = workspace + r'\area_center'
      arcpy.management.FeatureToPoint(area_layer, area_center, 'INSIDE')
      arcpy.management.CalculateGeometryAttributes(area_center, [['Center_X', 'POINT_X'], ['Center_Y', 'POINT_Y']], '', '', '', 'DD')
+
      #calculate area with sinusoidal projection with area center as central meridian
      craterSR = arcpy.Describe(crater_layer).spatialReference
      Gcs = craterSR.GCS
@@ -251,7 +284,7 @@ def area_reprojection():
 def write_crater_stats_file(stats_file):
     true_scale_craters = workspace + r'\True_Scale_Craters'
     now = datetime.datetime.now()
-    date = str(now.day) + "." + str(now.month) + "." + str(now.year)
+    date = str(now.month) + "." + str(now.day) + "." + str(now.year)
     vertices = workspace + r'\area_vertices'
     if os.path.exists(stats_file) == False:
         open(stats_file, 'x')
@@ -260,21 +293,9 @@ def write_crater_stats_file(stats_file):
 
     crater_stats_file = open(stats_file, "w")
 
-    if approach == "BCC":
-        methodology_name = "Buffered crater count"
-
-    if approach == "TRAD":
-        methodology_name = "Traditional crater counting approach"
-
-    if approach == "NSC":
-        methodology_name = "Non-sparseness correction"
-
-    if approach == "BNSC":
-        methodology_name = "Buffered non-sparseness correction"
-
     if file_type == "SCC":
         n_area = 1
-        crater_stats_file.write("# Spatial crater count for Craterstats - " + methodology_name + "\n"\
+        crater_stats_file.write("# Spatial crater count for Craterstats - Traditional crater counting approach" + "\n"\
                                 "#\n"\
                                 "# Date of measurement = " + str(date) + "\n"\
                                 "#\n"\
@@ -305,7 +326,7 @@ def write_crater_stats_file(stats_file):
                                         "#\n"\
                                         "Total_area = " + str(total_area) + " <km^2>\n"\
                                         "#\n"\
-                                        "# crater_diameters: \n"\
+                                        "# crater_diameters: <km>\n"\
                                         "crater = {diam, fraction, lon, lat\n")
 
         with arcpy.da.SearchCursor(true_scale_craters, ['Diameter', 'Center_X', 'Center_Y']) as cursor:						
@@ -315,7 +336,7 @@ def write_crater_stats_file(stats_file):
         crater_stats_file.close()
 
     if file_type == "DIAM":
-            crater_stats_file.write("# Diam file for Craterstats - " + methodology_name + "\n"\
+            crater_stats_file.write("# Diam file for Craterstats - Traditional crater counting approach" + "\n"\
                                 "#\n"\
                                 "# Date of measurement export = " + str(date) + "\n"\
                                 "#\n")
@@ -324,7 +345,7 @@ def write_crater_stats_file(stats_file):
     delete_list = [v, area_center]
     for x in delete_list:
         arcpy.management.Delete(x)
-            
+
 internal_reproject()
 area_reprojection()
 write_crater_stats_file(stats_file_output)
