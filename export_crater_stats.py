@@ -218,7 +218,7 @@ def internal_reproject():
     delete_list = [stereo_scratch, sinusoidal_projected_circle, vertices_merge, vertices_layer, crater_vertices, crater_vertices1, crater_center, crater_diameter,stereo_append]
     
     aprx = arcpy.mp.ArcGISProject("CURRENT")  # Open the current ArcGIS Pro project
-    map_obj = aprx.listMaps("Map")[0]
+    map_obj = aprx.activeMap
     map_obj.addDataFromPath(true_scale_craters)
 
     debug_mode = arcpy.GetParameterAsText(6)
@@ -349,4 +349,3 @@ def write_crater_stats_file(stats_file):
 internal_reproject()
 area_reprojection()
 write_crater_stats_file(stats_file_output)
-#arcpy.management.Delete(crater_layer)
